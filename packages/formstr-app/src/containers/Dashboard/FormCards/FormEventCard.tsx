@@ -63,11 +63,35 @@ export const FormEventCard: React.FC<FormEventCardProps> = ({
     iframe.style.display = "none";
     iframe.src = `${window.location.origin}/#${url}`;
     document.body.appendChild(iframe);
-  
+
     setTimeout(() => {
       try {
-        const content = iframe.contentDocument?.documentElement.innerHTML || "";
-        const blob = new Blob([content], { type: "text/html" });
+        let content = iframe.contentDocument?.documentElement.innerHTML || "";
+
+        const isLocalhost = window.location.hostname === "localhost" || 
+                            window.location.hostname === "127.0.0.1";
+        const protocol = isLocalhost ? "http" : "https";
+        const baseHref = `${protocol}://${window.location.host}/`;
+
+        const baseTag = `<base href="${baseHref}">`;
+
+        const hashFixScript = `
+    <script>
+      // Store the original form URL hash
+      const formUrl = "${url}";
+      
+      // When the page loads, check if we need to restore the proper hash
+      window.addEventListener('DOMContentLoaded', function() {
+        // If the hash is empty or points to dashboard, restore the form hash
+        if (!window.location.hash || window.location.hash === '#/dashboard') {
+          window.location.hash = formUrl;
+        }
+      });
+    </script>`;
+
+        content = content.replace("<head>", `<head>\n  ${baseTag}\n  ${hashFixScript}`);
+
+        const blob = new Blob([`<!DOCTYPE html><html>${content}</html>`], { type: "text/html" });
         const link = document.createElement("a");
         link.href = URL.createObjectURL(blob);
         link.download = `${name[1] || "form"}.html`;
@@ -130,8 +154,8 @@ export const FormEventCard: React.FC<FormEventCardProps> = ({
           <Button
             onClick={(e) => {
               secretKey
-          ? navigate(responsePath(secretKey, formId, relay, viewKey))
-          : navigate(`/r/${pubKey}/${formId}`);
+                ? navigate(responsePath(secretKey, formId, relay, viewKey))
+                : navigate(`/r/${pubKey}/${formId}`);
             }}
             type="dashed"
             style={{
