@@ -16,11 +16,29 @@ import { HEADER_MENU, HEADER_MENU_KEYS } from "./configs";
 import { useProfileContext } from "../../hooks/useProfileContext";
 import { NostrAvatar } from "./NostrAvatar";
 import { ReactComponent as GeyserIcon } from "../../Images/Geyser.svg";
-import { color } from "framer-motion";
+import { useState } from "react";
+import FAQModal from "../FAQModal";
+import { useApplicationContext } from '../../hooks/useApplicationContext';
 
 export const NostrHeader = () => {
   const { Header } = Layout;
   const { pubkey, requestPubkey, logout } = useProfileContext();
+  const [isFAQModalVisible, setIsFAQModalVisible] = useState(false);
+  const [selectedKey, setSelectedKey] = useState<string[]>([]);
+  const { openTemplateModal } = useApplicationContext();
+
+  const onMenuClick: MenuProps["onClick"] = (e) => {
+    if (e.key === HEADER_MENU_KEYS.HELP) {
+      setIsFAQModalVisible(true);
+      setSelectedKey([e.key]);
+      return; 
+    }
+    if (e.key === HEADER_MENU_KEYS.CREATE_FORMS) {
+      openTemplateModal();
+      return;
+    }
+    setSelectedKey([e.key]);
+  };
 
   const dropdownMenuItems: MenuProps["items"] = [
     ...[
@@ -108,12 +126,18 @@ export const NostrHeader = () => {
               mode="horizontal"
               theme="light"
               defaultSelectedKeys={[]}
+              selectedKeys={selectedKey}
               overflowedIndicator={<MenuOutlined />}
               items={newHeaderMenu}
+              onClick={onMenuClick}
             />
           </Col>
         </Row>
       </Header>
+      <FAQModal
+        visible={isFAQModalVisible}
+        onClose={() => { setIsFAQModalVisible(false); setSelectedKey([]); }}
+      />
     </>
   );
 };
