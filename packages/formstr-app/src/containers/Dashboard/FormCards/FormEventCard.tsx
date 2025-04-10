@@ -1,5 +1,5 @@
 import { Tag } from "@formstr/sdk/dist/formstr/nip101";
-import { Button, Card, Divider } from "antd";
+import { Button, Card, Divider, message } from "antd";
 import { Event } from "nostr-tools";
 import { useNavigate } from "react-router-dom";
 import DeleteFormTrigger from "./DeleteForm";
@@ -10,7 +10,7 @@ import {
   responsePath,
 } from "../../../utils/formUtils";
 import ReactMarkdown from "react-markdown";
-import { EditOutlined } from "@ant-design/icons";
+import { DownloadOutlined, EditOutlined } from "@ant-design/icons";
 import { useEffect, useState } from "react";
 
 interface FormEventCardProps {
@@ -28,6 +28,7 @@ export const FormEventCard: React.FC<FormEventCardProps> = ({
   viewKey,
 }) => {
   const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
   const publicForm = event.content === "";
   const [tags, setTags] = useState<Tag[]>([]);
   useEffect(() => {
@@ -41,12 +42,14 @@ export const FormEventCard: React.FC<FormEventCardProps> = ({
     };
     initialize();
   }, []);
+
   const name = event.tags.find((tag: Tag) => tag[0] === "name") || [];
   const pubKey = event.pubkey;
   const formId = event.tags.find((tag: Tag) => tag[0] === "d")?.[1];
   const relays = event.tags
     .filter((tag: Tag) => tag[0] === "relay")
     .map((t) => t[1]);
+
   if (!formId) {
     return <Card title="Invalid Form Event">{JSON.stringify(event)}</Card>;
   }
@@ -58,51 +61,94 @@ export const FormEventCard: React.FC<FormEventCardProps> = ({
     );
   }
 
-  const downloadForm = (url: string) => {
-    const iframe = document.createElement("iframe");
-    iframe.style.display = "none";
-    iframe.src = `${window.location.origin}/#${url}`;
-    document.body.appendChild(iframe);
+  const downloadForm = async (url: string) => {
+    setLoading(true);
+    try {
+      // Get the form page HTML
+      const formUrl = url.startsWith("/f/") ? `${window.location.origin}${url}` : `${window.location.origin}/form/${url}`;
 
-    setTimeout(() => {
-      try {
-        let content = iframe.contentDocument?.documentElement.innerHTML || "";
-
-        const isLocalhost = window.location.hostname === "localhost" || 
-                            window.location.hostname === "127.0.0.1";
-        const protocol = isLocalhost ? "http" : "https";
-        const baseHref = `${protocol}://${window.location.host}/`;
-
-        const baseTag = `<base href="${baseHref}">`;
-
-        const hashFixScript = `
-    <script>
-      // Store the original form URL hash
-      const formUrl = "${url}";
-      
-      // When the page loads, check if we need to restore the proper hash
-      window.addEventListener('DOMContentLoaded', function() {
-        // If the hash is empty or points to dashboard, restore the form hash
-        if (!window.location.hash || window.location.hash === '#/dashboard') {
-          window.location.hash = formUrl;
+      const response = await fetch(formUrl);
+      let html = await response.text();
+  
+      // Parse the document
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, "text/html");
+  
+      // Extract resources
+      const scripts = Array.from(doc.querySelectorAll("script[src]"));
+      const styles = Array.from(doc.querySelectorAll('link[rel="stylesheet"]'));
+  
+      const resources = await Promise.all([
+        ...scripts.map(async (script) => {
+          const src = script.getAttribute("src");
+          if (!src) return;
+          const res = await fetch(src.startsWith("http") ? src : `${window.location.origin}${src}`);
+          return {
+            type: "script",
+            content: await res.text(),
+            original: script.outerHTML
+          };
+        }),
+        ...styles.map(async (style) => {
+          const href = style.getAttribute("href");
+          if (!href) return;
+          const res = await fetch(href.startsWith("http") ? href : `${window.location.origin}${href}`);
+          return {
+            type: "style",
+            content: await res.text(),
+            original: style.outerHTML
+          };
+        }),
+      ]);
+  
+      // Inline the CSS
+      resources.forEach((res) => {
+        if (res?.type === "style") {
+          html = html.replace(res.original, `<style>${res.content}</style>`);
         }
       });
-    </script>`;
+  
+      // Inline the JS
+      resources.forEach((res) => {
+        if (res?.type === "script") {
+          html = html.replace(res.original, `<script>${res.content}</script>`);
+        }
+      });
+  
+      // Inject <base> tag to handle relative paths
+      html = html.replace("<head>", `<head><base href="${window.location.origin}/">`);
+  
+      // Get the hash path
+      const hashRoute = url.startsWith("/f/") ? `#${url}` : `#/f/${url}`;
 
-        content = content.replace("<head>", `<head>\n  ${baseTag}\n  ${hashFixScript}`);
-
-        const blob = new Blob([`<!DOCTYPE html><html>${content}</html>`], { type: "text/html" });
-        const link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
-        link.download = `${name[1] || "form"}.html`;
-        link.click();
-      } catch (error) {
-        console.error("Error downloading form:", error);
-      } finally {
-        document.body.removeChild(iframe);
-      }
-    }, 3000);
+  
+      // Inject the route forcing script early in the <head>
+      const forceRouteScript = `
+        <script>
+          window.__FORCE_ROUTE__ = "${hashRoute.replace(/^#/, '')}";
+          if (!window.location.hash || window.location.hash === "#/") {
+            window.location.hash = "${hashRoute}";
+          }
+        </script>`;
+  
+      html = html.replace("<head>", `<head>${forceRouteScript}`);
+  
+      // Save the HTML file
+      const blob = new Blob([html], { type: "text/html" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `${name[1] || "form"}.html`;
+      link.click();
+  
+      message.success("Form downloaded successfully!");
+    } catch (err) {
+      console.error("Download failed:", err);
+      message.error("Failed to download form.");
+    } finally {
+      setLoading(false);
+    }
   };
+  
 
   return (
     <Card
@@ -184,7 +230,7 @@ export const FormEventCard: React.FC<FormEventCardProps> = ({
             }}
             type="dashed"
           >
-            Open Form
+            Open Forms
           </Button>
           <Button
             onClick={(e: any) => {
@@ -198,6 +244,8 @@ export const FormEventCard: React.FC<FormEventCardProps> = ({
                 )
               );
             }}
+            icon ={<DownloadOutlined />}
+            loading={loading}
             style={{
               marginLeft: "10px",
               color: "blue",
