@@ -65,7 +65,9 @@ export const FormEventCard: React.FC<FormEventCardProps> = ({
     setLoading(true);
     try {
       // Get the form page HTML
-      const formUrl = url.startsWith("/f/") ? `${window.location.origin}${url}` : `${window.location.origin}/form/${url}`;
+      const formUrl = url.startsWith("/f/") 
+      ? `${window.location.origin}${url}` 
+      : `${window.location.origin}/form/${url}`;
 
       const response = await fetch(formUrl);
       let html = await response.text();
@@ -73,50 +75,47 @@ export const FormEventCard: React.FC<FormEventCardProps> = ({
       // Parse the document
       const parser = new DOMParser();
       const doc = parser.parseFromString(html, "text/html");
-  
-      // Extract resources
+
+      // make base href to us current domain
+      html = html.replace(
+        /<base href=".*?\/>/,
+        `<base href="${window.location.origin}/">`
+      );
+
+      // Inline  all scripts
       const scripts = Array.from(doc.querySelectorAll("script[src]"));
-      const styles = Array.from(doc.querySelectorAll('link[rel="stylesheet"]'));
-  
-      const resources = await Promise.all([
-        ...scripts.map(async (script) => {
-          const src = script.getAttribute("src");
-          if (!src) return;
-          const res = await fetch(src.startsWith("http") ? src : `${window.location.origin}${src}`);
-          return {
-            type: "script",
-            content: await res.text(),
-            original: script.outerHTML
-          };
-        }),
-        ...styles.map(async (style) => {
-          const href = style.getAttribute("href");
-          if (!href) return;
-          const res = await fetch(href.startsWith("http") ? href : `${window.location.origin}${href}`);
-          return {
-            type: "style",
-            content: await res.text(),
-            original: style.outerHTML
-          };
-        }),
-      ]);
-  
-      // Inline the CSS
-      resources.forEach((res) => {
-        if (res?.type === "style") {
-          html = html.replace(res.original, `<style>${res.content}</style>`);
-        }
-      });
-  
-      // Inline the JS
-      resources.forEach((res) => {
-        if (res?.type === "script") {
-          html = html.replace(res.original, `<script>${res.content}</script>`);
-        }
-      });
-  
-      // Inject <base> tag to handle relative paths
-      html = html.replace("<head>", `<head><base href="${window.location.origin}/">`);
+      await Promise.all(scripts.map(async (script) => {
+        const src = script.getAttribute("src");
+        if (!src) return;
+        const absoluteSrc = src.startsWith("http") ? src : `${window.location.origin}${src}`;
+
+        const res = await fetch(absoluteSrc);
+        const content = await res.text();
+        html = html.replace(script.outerHTML, `<script>${content}</script>`);
+      }));
+
+      // inline all styles
+      const styles = Array.from(doc.querySelectorAll("link[rel='stylesheet']"));
+      await Promise.all(styles.map(async (style) => {
+        const href = style.getAttribute("href");
+        if (!href) return;
+        const absoluteHref = href.startsWith("http") 
+        ? href 
+        : `${window.location.origin}${href}`;
+
+        const res = await fetch(absoluteHref);
+        html = html.replace(
+          style.outerHTML,
+          `<style>${await res.text()}</style>`
+        );
+      }));
+
+      // Force production paths for assets
+      html = html.replace(
+        /src="\/static\//g,
+        `src="${window.location.origin}/static/`
+      );
+
   
       // Get the hash path
       const hashRoute = url.startsWith("/f/") ? `#${url}` : `#/f/${url}`;
@@ -133,7 +132,7 @@ export const FormEventCard: React.FC<FormEventCardProps> = ({
   
       html = html.replace("<head>", `<head>${forceRouteScript}`);
   
-      // Save the HTML file
+      // Download the HTML file
       const blob = new Blob([html], { type: "text/html" });
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
