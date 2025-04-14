@@ -64,6 +64,7 @@ export const FormEventCard: React.FC<FormEventCardProps> = ({
   const downloadForm = async (url: string) => {
     setLoading(true);
     try {
+
       const formUrl = url.startsWith("/f/")
         ? `${window.location.origin}${url}`
         : `${window.location.origin}/form/${url}`;

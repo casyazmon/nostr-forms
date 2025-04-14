@@ -24,6 +24,16 @@ const RouteForce = () => {
 };
 
 
+// Force hash routing before app renders
+const forceRoute = window.__FORCE_ROUTE__;
+if (forceRoute) {
+  const targetHash = "#" + forceRoute.replace(/^\//, "");
+  if (window.location.hash !== targetHash) {
+    window.location.hash = targetHash;
+  }
+}
+
+
 function App() {
   return (
     <HashRouter>
