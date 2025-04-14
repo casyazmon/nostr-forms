@@ -64,80 +64,55 @@ export const FormEventCard: React.FC<FormEventCardProps> = ({
   const downloadForm = async (url: string) => {
     setLoading(true);
     try {
-      // Get the form page HTML
-      const formUrl = url.startsWith("/f/") 
-      ? `${window.location.origin}${url}` 
-      : `${window.location.origin}/form/${url}`;
-
+      const formUrl = url.startsWith("/f/")
+        ? `${window.location.origin}${url}`
+        : `${window.location.origin}/form/${url}`;
+  
       const response = await fetch(formUrl);
       let html = await response.text();
   
-      // Parse the document
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, "text/html");
-
-      // make base href to us current domain
-      html = html.replace(
-        /<base href=".*?\/>/,
-        `<base href="${window.location.origin}/">`
-      );
-
-      // Inline  all scripts
-      const scripts = Array.from(doc.querySelectorAll("script[src]"));
-      await Promise.all(scripts.map(async (script) => {
-        const src = script.getAttribute("src");
-        if (!src) return;
-        const absoluteSrc = src.startsWith("http") ? src : `${window.location.origin}${src}`;
-
-        const res = await fetch(absoluteSrc);
-        const content = await res.text();
-        html = html.replace(script.outerHTML, `<script>${content}</script>`);
-      }));
-
-      // inline all styles
-      const styles = Array.from(doc.querySelectorAll("link[rel='stylesheet']"));
-      await Promise.all(styles.map(async (style) => {
-        const href = style.getAttribute("href");
-        if (!href) return;
-        const absoluteHref = href.startsWith("http") 
-        ? href 
-        : `${window.location.origin}${href}`;
-
-        const res = await fetch(absoluteHref);
-        html = html.replace(
-          style.outerHTML,
-          `<style>${await res.text()}</style>`
+      // Create a ID for the downloaded app as a whole
+      const appId = `downloaded-app-${Date.now()}`;
+      
+      
+      html = html
+        // Inject configuration before React loads
+        .replace(
+          '<script defer="defer" src="/static/js/main.',
+          `<script>
+            window.__STANDALONE_MODE__ = true;
+            window.__FORCE_ROUTE__ = "${url.startsWith('/f/') ? url : `/f/${url}`}";
+            window.__PUBLIC_URL__ = "${window.location.origin}";
+          </script>
+          <script defer="defer" src="/static/js/main.`
+        )
+        // Make all asset paths absolute
+        .replace(/(src|href)="\/([^"]*)"/g, (match, attr, value) => {
+          // Ignore absolute URLs and data URLs
+          if (value.startsWith('http') || value.startsWith('data:')) return match;
+          return `${attr}="${window.location.origin}/${value}"`;
+        })
+        
+        .replace(
+          /<head>/,
+          `<head>
+            <base href="${window.location.origin}/" />
+            <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+            <meta name="downloaded-app" content="${appId}">
+          `
         );
-      }));
-
-      // Force production paths for assets
-      html = html.replace(
-        /src="\/static\//g,
-        `src="${window.location.origin}/static/`
-      );
-
   
-      // Get the hash path
-      const hashRoute = url.startsWith("/f/") ? `#${url}` : `#/f/${url}`;
-
-  
-      // Inject the route forcing script early in the <head>
-      const forceRouteScript = `
-        <script>
-          window.__FORCE_ROUTE__ = "${hashRoute.replace(/^#/, '')}";
-          if (!window.location.hash || window.location.hash === "#/") {
-            window.location.hash = "${hashRoute}";
-          }
-        </script>`;
-  
-      html = html.replace("<head>", `<head>${forceRouteScript}`);
-  
-      // Download the HTML file
-      const blob = new Blob([html], { type: "text/html" });
+      // Download the form as an HTML file
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
       link.download = `${name[1] || "form"}.html`;
+      document.body.appendChild(link);
       link.click();
+      setTimeout(() => {
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+      }, 100);
   
       message.success("Form downloaded successfully!");
     } catch (err) {
